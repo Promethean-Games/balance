@@ -1,7 +1,18 @@
-export function scoreAttempt({ moves, elapsedSeconds }) {
-  const moveBonus = Math.max(0, 300 - moves * 10);
-  const speedBonus = Math.max(0, 300 - Math.floor(elapsedSeconds / 10) * 10);
-  return 1000 + moveBonus + speedBonus;
+export const DEFAULT_SCORING = Object.freeze({
+  basePoints: 1000,
+  maxMoveBonus: 300,
+  pointsPerMove: 10,
+  maxSpeedBonus: 300,
+  pointsPerTenSeconds: 10,
+});
+
+export function scoreAttempt({ moves, elapsedSeconds }, config = DEFAULT_SCORING) {
+  const moveBonus = Math.max(0, config.maxMoveBonus - moves * config.pointsPerMove);
+  const speedBonus = Math.max(
+    0,
+    config.maxSpeedBonus - Math.floor(elapsedSeconds / 10) * config.pointsPerTenSeconds,
+  );
+  return config.basePoints + moveBonus + speedBonus;
 }
 
 export function starsForAttempt({ hintsUsed, moves, moveThreshold }) {

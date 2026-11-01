@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateExpression, expressionsAreEqual, parseRational } from '../src/math.mjs';
 import { LEVELS, validateLevels } from '../src/levels.mjs';
-import { createAttempt, placeTile, returnTile, undo, isStructurallyStable } from '../src/game.mjs';
+import {
+  createAttempt,
+  markHintUsed,
+  placeTile,
+  restartAttempt,
+  returnTile,
+  undo,
+  isStructurallyStable,
+} from '../src/game.mjs';
 import { scoreAttempt, starsForAttempt, updateLevelRecord } from '../src/scoring.mjs';
 import { enumerateSolutions } from '../src/puzzleValidation.mjs';
 
@@ -19,6 +27,8 @@ test('exact arithmetic handles precedence, grouping, fractions, decimals and per
   assert.ok(parseRational('1/2').equals(parseRational('0.5')));
   assert.ok(parseRational('50%').equals(parseRational('0.5')));
   assert.ok(parseRational('1/3').add(parseRational('2/3')).equals(parseRational('1')));
+  assert.equal(parseRational('1/4').toDisplay(), '0.25');
+  assert.equal(parseRational('1/3').toDisplay(), '1/3');
 });
 
 test('invalid syntax, division by zero and negative intermediate results are rejected', () => {
@@ -73,6 +83,13 @@ test('placement, relocation, occupied slots, inventory returns and undo restore 
   state = returnTile(state, level, 'l1-4').state;
   assert.equal(state.moves, 3);
   assert.equal(state.slots[1][0], null);
+});
+
+test('pause restart preserves hint use, while a new attempt resets it', () => {
+  const level = LEVELS[0];
+  const hinted = markHintUsed(createAttempt(level));
+  assert.equal(restartAttempt(level, hinted).hintsUsed, 1);
+  assert.equal(createAttempt(level).hintsUsed, 0);
 });
 
 test('matching positive expressions complete automatically and undo reopens the attempt', () => {

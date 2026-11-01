@@ -56,6 +56,7 @@ export class Rational {
   }
 
   toDecimal(places = 3) {
+    if (places === 0) return this.toString();
     const scale = 10n ** BigInt(places);
     const rounded = (this.numerator * scale * 2n / this.denominator + 1n) / 2n;
     const sign = rounded < 0n ? '-' : '';
@@ -63,6 +64,25 @@ export class Rational {
     const whole = digits.slice(0, -places);
     const fraction = digits.slice(-places).replace(/0+$/, '');
     return fraction ? `${sign}${whole}.${fraction}` : `${sign}${whole}`;
+  }
+
+  toDisplay(maxDecimalPlaces = 3) {
+    if (this.denominator === 1n) return this.toString();
+    let remaining = this.denominator;
+    let twos = 0;
+    let fives = 0;
+    while (remaining % 2n === 0n) {
+      remaining /= 2n;
+      twos += 1;
+    }
+    while (remaining % 5n === 0n) {
+      remaining /= 5n;
+      fives += 1;
+    }
+    const places = Math.max(twos, fives);
+    return remaining === 1n && places <= maxDecimalPlaces
+      ? this.toDecimal(places)
+      : this.toString();
   }
 }
 

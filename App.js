@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -12,7 +13,7 @@ import {
   Vibration,
 } from 'react-native';
 import DraggableTile from './src/DraggableTile';
-import { getLevel } from './src/levels.mjs';
+import { getLevel, validateLevels } from './src/levels.mjs';
 import {
   createAttempt,
   findTilePosition,
@@ -26,7 +27,7 @@ import {
   undo,
 } from './src/game.mjs';
 import { scoreAttempt, starsForAttempt, updateLevelRecord } from './src/scoring.mjs';
-import { getReports, loadSlot, resetSlot, saveReport, saveSlot } from './src/storage';
+import { getReports, loadSlot, saveReport, saveSlot } from './src/storage';
 
 const COLORS = {
   ink: '#25324A',
@@ -42,11 +43,13 @@ const COLORS = {
 const TUTORIALS = {
   1: 'Drag a number onto any open slot. Place weights on both sides until their totals match.',
   3: 'Each placement or move counts. Undo never adds a move, so experiment freely.',
-  4: 'This plus sign is fixed. Build an expression around it with the number tiles.',
+  4: 'These operators are fixed. Build an expression around them with the number tiles.',
   7: 'Operators are tiles now. Put numbers and operators in the order you want.',
   8: 'Fractions and decimals can mean the same value. The scale compares them exactly.',
   9: 'Use each parenthesis tile separately. Keep the two sides within one tile of each other.',
 };
+const levelErrors = validateLevels();
+if (levelErrors.length > 0) throw new Error(`Invalid authored puzzle: ${levelErrors.join('; ')}`);
 const DEFAULT_SETTINGS = {
   showMoveCounter: true,
   soundEffects: true,
@@ -133,6 +136,11 @@ export default function App() {
   const tilt = scaleDifference
     ? Math.max(-7, Math.min(7, (Number(scaleDifference.numerator) / Number(scaleDifference.denominator)) * 1.5))
     : 0;
+  const animatedTilt = useRef(new Animated.Value(0)).current;
+  const beamRotation = animatedTilt.interpolate({
+    inputRange: [-7, 7],
+    outputRange: ['-7deg', '7deg'],
+  });
   const occupiedIds = attempt ? attempt.slots.flat().filter(Boolean) : [];
   const inventory = level.tiles.filter(
     (tile) => !level.fixed.some((item) => item.id === tile.id) && !occupiedIds.includes(tile.id),
@@ -152,6 +160,15 @@ export default function App() {
     })();
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    Animated.spring(animatedTilt, {
+      toValue: tilt,
+      speed: 18,
+      bounciness: 5,
+      useNativeDriver: true,
+    }).start();
+  }, [animatedTilt, tilt]);
 
   useEffect(() => {
     if (screen !== 'play' || !attempt || modal || attempt.complete || attempt.failed) return undefined;
@@ -188,29 +205,42 @@ export default function App() {
 
   function startNewSlot(slotId) {
     setSelectedSlot(slotId);
-    setSlots((previous) => ({ ...previous, [slotId]: emptySave() }));
     setModal(null);
-    resetSlot(slotId).catch(() => setStorageError('Could not reset this save slot.'));
     const fresh = emptySave();
-    saveSlot(slotId, fresh).catch(() => setStorageError('Could not create this save slot.'));
     enterGame(slotId, fresh, 1);
   }
 
   function enterGame(slotId, data, levelId) {
     const chosenLevel = getLevel(levelId);
-    const currentAttempt = data.currentLevel === levelId && data.currentAttempt
-      ? data.currentAttempt
-      : createAttempt(chosenLevel);
+    const resumedAttempt = data.currentLevel === levelId && data.currentAttempt;
+    const currentAttempt = resumedAttempt ? data.currentAttempt : createAttempt(chosenLevel);
+    const restoredHintSide = resumedAttempt ? data.revealedHintSide ?? null : null;
     setSelectedSlot(slotId);
     setAttempt(currentAttempt);
     setSelectedTile(null);
+    setRevealedHintSide(restoredHintSide);
     setScreen('play');
     setModal(null);
-    const updated = { ...data, currentLevel: levelId, currentAttempt, lastPlayed: Date.now() };
+    const updated = {
+      ...data,
+      currentLevel: levelId,
+      currentAttempt,
+      revealedHintSide: restoredHintSide,
+      lastPlayed: Date.now(),
+    };
     setSlots((previous) => ({ ...previous, [slotId]: updated }));
     saveSlot(slotId, updated).catch(() => setStorageError('Could not save your game.'));
     if (TUTORIALS[levelId] && !data.tutorialsSeen.includes(levelId)) {
       setModal('tutorial');
+    } else if (
+      currentAttempt.hintsUsed === 2
+      && (data.revealedHintSide === undefined || data.revealedHintSide === null)
+    ) {
+      setModal('hintSide');
+    } else if (currentAttempt.failed) {
+      setModal('failure');
+    } else if (currentAttempt.complete) {
+      setModal('complete');
     }
   }
 
@@ -236,10 +266,12 @@ export default function App() {
       ...current,
       currentLevel: levelId,
       currentAttempt: createAttempt(getLevel(levelId)),
+      revealedHintSide: null,
       lastPlayed: Date.now(),
     };
     setAttempt(data.currentAttempt);
     setSelectedTile(null);
+    setRevealedHintSide(null);
     setModal(null);
     setScreen('play');
     persistSave(data);
@@ -352,8 +384,15 @@ export default function App() {
 
   function revealExpression(side) {
     setRevealedHintSide(side);
+    persistSave({ ...save, revealedHintSide: side });
     setHintContent({ kind: 'expression', side });
     setModal('hint');
+  }
+
+  function returnToStart() {
+    persistSave({ ...save, currentAttempt: attempt, lastPlayed: Date.now() });
+    setModal(null);
+    setScreen('home');
   }
 
   function formatHintExpression(side) {
@@ -401,13 +440,13 @@ export default function App() {
   }
 
   function finishSettings() {
-    setScreen(settingsReturn);
+    setScreen(settingsReturn === 'failure' ? 'play' : settingsReturn);
     setModal(settingsReturn === 'failure' ? 'failure' : settingsReturn === 'play' ? 'pause' : null);
   }
 
   function visibleValue(side) {
     const value = getSideValue(attempt, level, side);
-    return value ? value.toDecimal(3) : '—';
+    return value ? value.toDisplay(3) : '—';
   }
 
   function renderTile(tile, compact = false) {
@@ -425,7 +464,7 @@ export default function App() {
 
   function renderBoardSide(side) {
     return (
-      <View style={styles.sideCard}>
+      <View style={[styles.sideCard, save.settings.highContrast && styles.highContrastCard]}>
         <Text style={styles.sideTitle}>{side === 0 ? 'LEFT' : 'RIGHT'}</Text>
         <Text style={[styles.total, { fontSize: 24 * displayScale }]}>{visibleValue(side)}</Text>
         <View style={styles.slotRow}>
@@ -446,6 +485,7 @@ export default function App() {
                   styles.slot,
                   tile && styles.filledSlot,
                   selectedTile && !tile && styles.targetSlot,
+                  save.settings.highContrast && styles.highContrastSlot,
                 ]}
               >
                 {tile
@@ -475,7 +515,7 @@ export default function App() {
           <Button onPress={() => setModal(null)}>Resume</Button>
           <Button variant="secondary" onPress={() => openSettings('play')}>Settings</Button>
           <Button variant="secondary" onPress={() => setModal('restartConfirm')}>Restart level</Button>
-          <Button variant="secondary" onPress={() => { setModal(null); setScreen('home'); }}>Return to start</Button>
+          <Button variant="secondary" onPress={returnToStart}>Return to start</Button>
           <Button variant="quiet" onPress={requestHint}>Give me a hint</Button>
         </>
       );
@@ -499,12 +539,12 @@ export default function App() {
       actions = (
         <>
           <Button onPress={() => {
-            const retry = restartAttempt(level, attempt);
+            const retry = createAttempt(level);
             setAttempt(retry);
             persistSave({ ...save, currentAttempt: retry });
             setModal(null);
           }}>Try again</Button>
-          <Button variant="secondary" onPress={() => { setModal(null); setScreen('home'); }}>Return to start</Button>
+          <Button variant="secondary" onPress={returnToStart}>Return to start</Button>
           <Button variant="secondary" onPress={() => openSettings('failure')}>Settings</Button>
         </>
       );
@@ -625,7 +665,7 @@ export default function App() {
           <View style={styles.brandMark}><Text style={styles.brandIcon}>⚖</Text></View>
           <Text style={styles.brand}>BALANCE</Text>
           <Text style={styles.tagline}>A little math. A lot of aha.</Text>
-          <View style={styles.homeCard}>
+          <View style={[styles.homeCard, save.settings.highContrast && styles.highContrastCard]}>
             <Button onPress={() => openSlots('new')}>New game</Button>
             <Button variant="secondary" onPress={() => openSlots('continue')}>Continue</Button>
             <Button variant="quiet" onPress={() => openSettings('home')}>Settings</Button>
@@ -646,7 +686,7 @@ export default function App() {
               ? Object.values(data.records).reduce((sum, record) => sum + (record.bestStars ?? 0), 0)
               : 0;
             return (
-              <View key={slotId} style={styles.saveCard}>
+              <View key={slotId} style={[styles.saveCard, save.settings.highContrast && styles.highContrastCard]}>
                 <View style={styles.saveHeading}>
                   <Heading>Save slot {slotId}</Heading>
                   <Text style={styles.saveMeta}>{data ? `Level ${data.currentLevel}` : 'Empty slot'}</Text>
@@ -672,7 +712,7 @@ export default function App() {
           <Button variant="quiet" small onPress={finishSettings}>‹ Back</Button>
           <Heading large>Settings</Heading>
           <Text style={styles.subtitle}>Preferences are saved in save slot {selectedSlot}.</Text>
-          <View style={styles.settingsCard}>
+          <View style={[styles.settingsCard, save.settings.highContrast && styles.highContrastCard]}>
             <ToggleRow label="Show move counter" value={save.settings.showMoveCounter} onValueChange={(value) => updateSetting('showMoveCounter', value)} />
             <ToggleRow label="Sound effects" value={save.settings.soundEffects} onValueChange={(value) => updateSetting('soundEffects', value)} />
             <ToggleRow label="Music" value={save.settings.music} onValueChange={(value) => updateSetting('music', value)} />
@@ -696,16 +736,19 @@ export default function App() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Pause game"
-                onPress={() => setModal('pause')}
+                onPress={() => {
+                  persistSave({ ...save, currentAttempt: attempt, lastPlayed: Date.now() });
+                  setModal('pause');
+                }}
                 style={styles.pauseButton}
               ><Text style={styles.pauseIcon}>Ⅱ</Text></Pressable>
             </View>
           </View>
           <Text style={styles.objective}>{level.objective}</Text>
           <ScrollView contentContainerStyle={styles.gameContent} keyboardShouldPersistTaps="handled">
-            <View style={styles.board}>
+            <View style={[styles.board, save.settings.highContrast && styles.highContrastCard]}>
               <View style={styles.scaleBeamWrap}>
-                <View style={[styles.scaleBeam, { transform: [{ rotate: `${tilt}deg` }] }]} />
+                <Animated.View style={[styles.scaleBeam, { transform: [{ rotate: beamRotation }] }]} />
                 <View style={styles.scalePivot} />
               </View>
               <View style={styles.scaleSides}>
@@ -721,7 +764,7 @@ export default function App() {
                 </View>
               )}
             </View>
-            <View style={styles.inventoryPanel}>
+            <View style={[styles.inventoryPanel, save.settings.highContrast && styles.highContrastCard]}>
               <View style={styles.inventoryHeader}>
                 <Text style={styles.inventoryTitle}>YOUR TILES</Text>
                 <Text style={styles.inventoryHint}>Drag to a slot · tap to choose</Text>
@@ -763,6 +806,8 @@ function formatTime(seconds) {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: COLORS.background },
   highContrast: { backgroundColor: '#FFFFFF' },
+  highContrastCard: { backgroundColor: '#FFFFFF', borderColor: '#111111', borderWidth: 2 },
+  highContrastSlot: { borderColor: '#111111', borderStyle: 'solid' },
   loading: { flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: COLORS.ink, fontWeight: '700', fontSize: 18 },
   centeredScreen: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 28 },
