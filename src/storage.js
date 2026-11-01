@@ -4,6 +4,41 @@ const DATABASE_NAME = 'balance.db';
 const SAVE_VERSION = 1;
 let databasePromise;
 
+function validSave(data) {
+  if (
+    !data
+    || data.version !== SAVE_VERSION
+    || !Number.isInteger(data.currentLevel)
+    || data.currentLevel < 1
+    || data.currentLevel > 10
+    || !Number.isInteger(data.unlockedLevels)
+    || data.unlockedLevels < data.currentLevel
+    || !data.settings
+    || typeof data.settings !== 'object'
+    || !data.records
+    || typeof data.records !== 'object'
+    || !Array.isArray(data.tutorialsSeen)
+  ) return false;
+  const attempt = data.currentAttempt;
+  if (attempt === null) return true;
+  return Boolean(
+    attempt
+    && attempt.levelId === data.currentLevel
+    && Array.isArray(attempt.slots)
+    && attempt.slots.length === 2
+    && attempt.slots.every((side) => (
+      Array.isArray(side) && side.length === 5 && side.every((tileId) => tileId === null || typeof tileId === 'string')
+    ))
+    && Number.isInteger(attempt.moves)
+    && attempt.moves >= 0
+    && Number.isInteger(attempt.elapsedSeconds)
+    && attempt.elapsedSeconds >= 0
+    && Number.isInteger(attempt.hintsUsed)
+    && attempt.hintsUsed >= 0
+    && Array.isArray(attempt.history)
+  );
+}
+
 async function database() {
   if (!databasePromise) {
     databasePromise = (async () => {
@@ -55,7 +90,7 @@ export async function loadSlot(slotId) {
   if (!row || row.version !== SAVE_VERSION) return null;
   try {
     const data = JSON.parse(row.payload);
-    if (!data || typeof data !== 'object' || data.version !== SAVE_VERSION) throw new Error('Invalid save');
+    if (!validSave(data)) throw new Error('Invalid save');
     return data;
   } catch {
     await db.runAsync('DELETE FROM saves WHERE slot_id = ?', slotId);

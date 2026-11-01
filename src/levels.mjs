@@ -39,12 +39,17 @@ export const LEVELS = [
     implicitAddition: true, moveThreshold: 5,
   }),
   makeLevel(4, 'Plus & Minus', 'Use the fixed addition sign.', [
-    number('l4-7', '7'), number('l4-2', '2'), number('l4-9', '9'),
-    number('l4-1', '1'), number('l4-5', '5'), number('l4-11', '11'),
-    operator('l4-plus', '+'),
-  ], [['l4-7', 'l4-plus', 'l4-2'], ['l4-9']], {
-    fixed: [{ id: 'l4-plus', side: 0, index: 1 }],
-    moveThreshold: 3,
+    number('l4-7', '7'), number('l4-2', '2'), number('l4-12', '12'),
+    number('l4-3', '3'), number('l4-1', '1'), number('l4-4', '4'),
+    number('l4-5', '5'), number('l4-11', '11'),
+    operator('l4-plus', '+'), operator('l4-minus', '-'),
+  ], [['l4-7', 'l4-plus', 'l4-2'], ['l4-12', 'l4-minus', 'l4-3']], {
+    fixed: [
+      { id: 'l4-plus', side: 0, index: 1 },
+      { id: 'l4-minus', side: 1, index: 1 },
+    ],
+    moveThreshold: 4,
+    objective: 'Use the fixed addition and subtraction signs.',
   }),
   makeLevel(5, 'Multiply', 'A fixed multiplication sign changes the total.', [
     number('l5-3', '3'), number('l5-4', '4'), number('l5-12', '12'),

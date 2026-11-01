@@ -158,7 +158,7 @@ export function evaluateExpression(tokens, { implicitAddition = false } = {}) {
       numberCount += 1;
       try {
         const parsed = parseRational(value);
-        return parsed.isNegative() ? null : parsed;
+        return parsed.isPositive() ? parsed : null;
       } catch {
         return null;
       }
